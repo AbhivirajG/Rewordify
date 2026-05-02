@@ -13,6 +13,27 @@ const nextConfig = {
         "onnxruntime-node$": false,
       };
     }
+
+    // onnxruntime-web ships pre-bundled, pre-minified .mjs files (e.g.
+    // ort.webgpu.bundle.min.mjs) that use top-level `import.meta`. Without
+    // these tweaks Next 14's webpack tries to re-parse and re-minify them
+    // as plain scripts and Terser blows up with:
+    //   "import.meta cannot be used outside of module code"
+    config.module.rules.push({
+      test: /\.m?js$/,
+      resolve: { fullySpecified: false },
+    });
+    config.module.noParse = /onnxruntime-web/;
+
+    if (config.optimization?.minimizer) {
+      config.optimization.minimizer.forEach((plugin) => {
+        if (plugin.constructor?.name === "TerserPlugin") {
+          plugin.options = plugin.options || {};
+          plugin.options.exclude = /onnxruntime-web|@huggingface\/transformers/;
+        }
+      });
+    }
+
     return config;
   },
 

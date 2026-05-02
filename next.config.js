@@ -1,26 +1,35 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
-
-  // Disable SWC minification and use Terser instead.
-  // This allows us to exclude onnxruntime-web from minification.
   swcMinify: false,
 
-  webpack: (config, { isServer, webpack }) => {
-    // Stub out Node-only bindings on the client side
+  webpack: (config, { isServer }) => {
     if (!isServer) {
+      // Stub out Node-only bindings on the client side
       config.resolve.alias = {
         ...(config.resolve.alias ?? {}),
         sharp$: false,
         "onnxruntime-node$": false,
       };
+
+      // Put onnxruntime-web in its own named chunk so we can exclude it from minification
+      config.optimization.splitChunks = {
+        ...config.optimization.splitChunks,
+        cacheGroups: {
+          ...config.optimization.splitChunks?.cacheGroups,
+          onnxruntime: {
+            test: /[\\/]node_modules[\\/]onnxruntime-web[\\/]/,
+            name: "onnxruntime-vendor",
+            chunks: "all",
+            enforce: true,
+            priority: 100,
+          },
+        },
+      };
     }
 
-    // onnxruntime-web ships pre-bundled, pre-minified .mjs files that use
-    // `import.meta`. We need to:
-    // 1. Tell webpack not to parse them (they're already bundled)
-    // 2. Treat .mjs files as ES modules
-    // 3. Exclude them from Terser minification
+    // Don't parse onnxruntime-web - it's pre-bundled
+    config.module.noParse = /onnxruntime-web/;
 
     // Ensure .mjs files resolve correctly
     config.module.rules.push({
@@ -28,20 +37,25 @@ const nextConfig = {
       resolve: { fullySpecified: false },
     });
 
-    // Don't parse onnxruntime-web - it's pre-bundled
-    config.module.noParse = /onnxruntime-web/;
-
-    // Exclude onnxruntime-web from Terser minification
+    // Replace TerserPlugin with one that excludes the onnxruntime chunk
     if (config.optimization?.minimizer) {
       config.optimization.minimizer = config.optimization.minimizer.map(
-        (minimizer) => {
-          if (minimizer.constructor?.name === "TerserPlugin") {
-            return new minimizer.constructor({
-              ...minimizer.options,
-              exclude: /onnxruntime-web/,
+        (plugin) => {
+          if (
+            plugin.constructor.name === "TerserPlugin" ||
+            plugin.constructor.name === "TerserPlugin"
+          ) {
+            const TerserPlugin = require("terser-webpack-plugin");
+            return new TerserPlugin({
+              parallel: true,
+              exclude: /onnxruntime/,
+              terserOptions: {
+                compress: true,
+                mangle: true,
+              },
             });
           }
-          return minimizer;
+          return plugin;
         }
       );
     }

@@ -2,10 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
 
-  // Transformers.js ships optional Node-only bindings (sharp, onnxruntime-node)
-  // that we never touch in the browser. Stub them out so webpack doesn't try
-  // to bundle them client-side.
-  webpack: (config, { isServer }) => {
+  // Disable SWC minification and use Terser instead.
+  // This allows us to exclude onnxruntime-web from minification.
+  swcMinify: false,
+
+  webpack: (config, { isServer, webpack }) => {
+    // Stub out Node-only bindings on the client side
     if (!isServer) {
       config.resolve.alias = {
         ...(config.resolve.alias ?? {}),
@@ -14,30 +16,39 @@ const nextConfig = {
       };
     }
 
-    // onnxruntime-web ships pre-bundled, pre-minified .mjs files (e.g.
-    // ort.webgpu.bundle.min.mjs) that use top-level `import.meta`. Without
-    // these tweaks Next 14's webpack tries to re-parse and re-minify them
-    // as plain scripts and Terser blows up with:
-    //   "import.meta cannot be used outside of module code"
+    // onnxruntime-web ships pre-bundled, pre-minified .mjs files that use
+    // `import.meta`. We need to:
+    // 1. Tell webpack not to parse them (they're already bundled)
+    // 2. Treat .mjs files as ES modules
+    // 3. Exclude them from Terser minification
+
+    // Ensure .mjs files resolve correctly
     config.module.rules.push({
       test: /\.m?js$/,
       resolve: { fullySpecified: false },
     });
+
+    // Don't parse onnxruntime-web - it's pre-bundled
     config.module.noParse = /onnxruntime-web/;
 
+    // Exclude onnxruntime-web from Terser minification
     if (config.optimization?.minimizer) {
-      config.optimization.minimizer.forEach((plugin) => {
-        if (plugin.constructor?.name === "TerserPlugin") {
-          plugin.options = plugin.options || {};
-          plugin.options.exclude = /onnxruntime-web|@huggingface\/transformers/;
+      config.optimization.minimizer = config.optimization.minimizer.map(
+        (minimizer) => {
+          if (minimizer.constructor?.name === "TerserPlugin") {
+            return new minimizer.constructor({
+              ...minimizer.options,
+              exclude: /onnxruntime-web/,
+            });
+          }
+          return minimizer;
         }
-      });
+      );
     }
 
     return config;
   },
 
-  // Next 14 still uses the experimental flag for server-only packages.
   experimental: {
     serverComponentsExternalPackages: [
       "@huggingface/transformers",

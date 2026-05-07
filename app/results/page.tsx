@@ -2,7 +2,7 @@
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import type {
   DetectionResult,
   HighlightedSegment,
@@ -17,6 +17,9 @@ import {
 import { verdictFromScore } from "@/lib/detection/verdict";
 import { HumanizeBetaModal } from "@/components/HumanizeBetaModal";
 import { GptZeroBanner } from "@/components/GptZeroBanner";
+import { SignInForResultsModal } from "@/components/SignInForResultsModal";
+import { createClient } from "@/lib/supabase/client";
+import type { User } from "@supabase/supabase-js";
 
 const STORAGE_KEY = "rewordify:lastAnalysis";
 
@@ -80,7 +83,12 @@ export default function ResultsPage() {
 
 function ResultsInner() {
   const params = useSearchParams();
+  const router = useRouter();
   const id = params.get("id");
+
+  const supabase = useMemo(() => createClient(), []);
+  const [sessionUser, setSessionUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
 
   const [analysis, setAnalysis] = useState<StoredAnalysis | null>(null);
   const [hydrated, setHydrated] = useState(false);
@@ -139,6 +147,23 @@ function ResultsInner() {
       console.error("Failed to read stored analysis", e);
     }
   }, [id]);
+
+  useEffect(() => {
+    const init = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      setSessionUser(session?.user ?? null);
+      setAuthReady(true);
+    };
+    void init();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSessionUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, [supabase]);
 
   const result: DetectionResult | null = analysis?.result ?? null;
   const originalAiPercent = result?.aiPercent ?? null;
@@ -402,6 +427,32 @@ function ResultsInner() {
     return (
       <main className="flex-grow w-full max-w-5xl mx-auto px-8 pt-12 pb-24">
         <p className="font-code-sm text-code-sm text-outline">Loading…</p>
+      </main>
+    );
+  }
+
+  if (!authReady) {
+    return (
+      <main className="flex-grow w-full max-w-5xl mx-auto px-8 pt-12 pb-24">
+        <p className="font-code-sm text-code-sm text-outline">Loading…</p>
+      </main>
+    );
+  }
+
+  if (!sessionUser) {
+    return (
+      <main className="relative flex-grow w-full max-w-5xl mx-auto px-8 pt-12 pb-24 min-h-[50vh]">
+        <SignInForResultsModal
+          open
+          onClose={() => router.push("/")}
+          returnTo={id ? `/results?id=${encodeURIComponent(id)}` : "/results"}
+          title="Sign in to view this report"
+          description="Your analysis is saved in this browser session. Sign in with Google to open your full results page and sync access across devices."
+        />
+        <div className="opacity-30 pointer-events-none select-none" aria-hidden>
+          <p className="font-code-sm text-outline mb-4">Report locked</p>
+          <div className="h-32 border border-neutral-800 bg-surface-container-lowest" />
+        </div>
       </main>
     );
   }

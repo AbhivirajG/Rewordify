@@ -6,7 +6,14 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "Rewordify — AI Detector + Humanizer",
   description:
-    "Detect AI-generated text and rewrite it into natural, human-sounding prose.",
+    "Detect AI-generated text and rewrite it into natural, human-sounding prose. GPT Zero-style AI detection plus humanization.",
+  keywords: [
+    "GPT Zero",
+    "AI detector",
+    "AI humanizer",
+    "detect AI text",
+    "humanize AI writing",
+  ],
 };
 
 export default function RootLayout({

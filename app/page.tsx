@@ -10,8 +10,12 @@ import {
   type ModelProgress,
 } from "@/lib/detection/model";
 import { verdictFromScore } from "@/lib/detection/verdict";
+import { createClient } from "@/lib/supabase/client";
+import { SignInForResultsModal } from "@/components/SignInForResultsModal";
+import type { User } from "@supabase/supabase-js";
 
 const STORAGE_KEY = "rewordify:lastAnalysis";
+const HOME_DRAFT_KEY = "rewordify:homeDraftText";
 
 // Blend weights: the neural model is more reliable than heuristics on
 // modern LLM text, but we keep heuristic signal so short/edge-case inputs
@@ -23,6 +27,10 @@ type ModelStatus = "idle" | "loading" | "ready" | "error";
 
 export default function HomePage() {
   const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+  const [user, setUser] = useState<User | null>(null);
+  const [authReady, setAuthReady] = useState(false);
+  const [signInModalOpen, setSignInModalOpen] = useState(false);
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +78,31 @@ export default function HomePage() {
     prefetchDetector(handleModelProgress);
   }, []);
 
+  useEffect(() => {
+    const init = async () => {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      setUser(session?.user ?? null);
+      setAuthReady(true);
+    };
+    void init();
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null);
+    });
+    return () => subscription.unsubscribe();
+  }, [supabase]);
+
+  useEffect(() => {
+    const saved = sessionStorage.getItem(HOME_DRAFT_KEY);
+    if (saved != null && saved !== "") {
+      setText(saved);
+      sessionStorage.removeItem(HOME_DRAFT_KEY);
+    }
+  }, []);
+
   const charCount = text.length;
   const wordCount = useMemo(() => {
     const trimmed = text.trim();
@@ -95,6 +128,11 @@ export default function HomePage() {
 
   async function handleSubmit() {
     if (!text.trim() || submitting) return;
+    if (!authReady) return;
+    if (!user) {
+      setSignInModalOpen(true);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -169,6 +207,14 @@ export default function HomePage() {
 
   return (
     <main className="flex-grow flex flex-col items-center justify-center w-full max-w-4xl mx-auto px-8 mt-12 mb-12">
+      <SignInForResultsModal
+        open={signInModalOpen}
+        onClose={() => setSignInModalOpen(false)}
+        returnTo="/"
+        onBeforeOAuth={() => {
+          sessionStorage.setItem(HOME_DRAFT_KEY, text);
+        }}
+      />
       <div className="w-full flex justify-between items-end mb-4 font-code-sm text-code-sm text-secondary">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-2">
@@ -241,7 +287,7 @@ export default function HomePage() {
       <div className="mt-12 flex flex-col items-center gap-6">
         <button
           onClick={handleSubmit}
-          disabled={!text.trim() || submitting}
+          disabled={!text.trim() || submitting || !authReady}
           className="px-12 py-4 bg-transparent border border-amber-500 text-amber-500 font-label-caps text-label-caps uppercase tracking-[0.2em] hover:bg-amber-500/10 active:scale-95 transition-all duration-200 flex items-center gap-3 group disabled:opacity-40 disabled:cursor-not-allowed disabled:active:scale-100"
         >
           <span
